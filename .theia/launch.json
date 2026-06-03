@@ -1,0 +1,54 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "dac_adc_ex",
+            "type": "ccs-debug",
+            "request": "launch",
+            "projectInfo": {
+                "name": "dac_adc_ex",
+                "resourceId": "/dac_adc_ex"
+            },
+            "connections": [
+                {
+                    "name": "Texas Instruments XDS100v2 USB Debug Probe_0",
+                    "cores": [
+                        {
+                            "name": "C28xx_CPU1",
+                            "debuggerSettings": {
+                                "data": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\" ?>\n<PropertyValues/>\n"
+                            }
+                        }
+                    ]
+                }
+            ],
+            "launchSettings": {
+                "coresToLoadForProjectLaunch": [
+                    "C28xx_CPU1"
+                ]
+            }
+        },
+        {
+            "name": "embedded-systems-dac-adc-sci",
+            "type": "ccs-debug",
+            "request": "launch",
+            "projectInfo": {
+                "name": "embedded-systems-dac-adc-sci",
+                "resourceId": "/embedded-systems-dac-adc-sci"
+            },
+            "connections": [
+                {
+                    "name": "Texas Instruments XDS100v2 USB Debug Probe_0",
+                    "cores": [
+                        {
+                            "name": "C28xx_CPU1",
+                            "debuggerSettings": {
+                                "data": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\" ?>\n<PropertyValues/>\n"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}
