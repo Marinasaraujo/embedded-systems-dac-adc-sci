@@ -1,106 +1,168 @@
-import math
-import datetime
+import serial
+import struct
+import time
+import numpy as np
+import matplotlib.pyplot as plt
 
-def gerar_vetor_dac_parametrizado(frequencia_onda, amostras_por_ciclo, dac_bits, amplitude_normalizada):
+SERIAL_PORT = 'COM11'
+BAUD_RATE = 115200
+
+CMD_RECEIVE_VECTOR = 1 # PC envia vetor para o DAC do 28379D
+CMD_SEND_VECTOR    = 2 # PC pede o vetor do ADC para o 28379D
+
+# Parâmetros alteraveis do sistema 
+NUM_PONTOS_DAC = 200        # Numero de amostras enviadas ao DAC
+FREQ_ATUALIZACAO_DAC = 12000 # Taxa de atualizacao do DAC em Hz (Timer 1)
+FREQ_FUNDAMENTAL = 60       # Frequencia fundamental em Hz
+AMP_FUNDAMENTAL = 0.8       # Amplitude da fundamental (0.0 a 1.0)
+
+PRESENCA_HARMONICA = True
+FREQ_HARMONICA = 180        # 3a Harmonica (180 Hz)
+AMP_HARMONICA = 0.2         # Amplitude da harmonica (0.0 a 1.0)
+
+NUM_PONTOS_ADC = 100        # Tamanho do buffer configurado no C (TAM_BUFFER_ADC)
+TAXA_AMOSTRAGEM_ADC = 12000 # Taxa de amostragem do ADC em Hz (Timer 0)
+
+
+def main():
+    print("--- Gerador de Funções e Analisador de Dados SCI ---")
+    
+    try:
+        with serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=3) as ser:
+            print(f"Porta serial {SERIAL_PORT} aberta a {BAUD_RATE} bps.")
+            time.sleep(1)
+            ser.flushInput()
+
+            while True:
+                print("\n----- MENU -----")
+                print("1. Sintetizar e Enviar Forma de Onda (DAC)")
+                print("2. Adquirir e Analisar Sinal (ADC)")
+                print("0. Sair")
+                
+                choice = input("Escolha uma opcao: ")
+
+                if choice == '1':
+                    send_vector(ser)
+                elif choice == '2':
+                    receive_vector(ser)
+                elif choice == '0':
+                    print("Encerrando.")
+                    break
+                else:
+                    print("Opcao invalida.")
+
+    except serial.SerialException as e:
+        print(f"\nERRO: Nao foi possivel abrir a porta serial '{SERIAL_PORT}'.\nDetalhe: {e}")
+
+def send_vector(ser_connection):
     """
-    Gera um vetor de valores para um DAC, representando uma forma de onda senoidal
-    com base nos parâmetros fornecidos, incluindo amplitude normalizada.
-
-    Args:
-        frequencia_onda (float): Frequência da forma de onda em Hertz (Hz).
-        amostras_por_ciclo (int): Número de amostras para um ciclo completo da onda.
-        dac_bits (int): Resolução em bits do DAC (ex: 12 para 0-4095).
-        amplitude_normalizada (float): Amplitude da senoide de 0 a 1, onde 1 é a amplitude máxima do DAC.
-
-    Returns:
-        tuple: Uma tupla contendo:
-            - list: Uma lista de inteiros com os valores do DAC.
-            - float: A frequência de amostragem calculada (Hz).
+    Gera a onda parametrizada, empacota e envia via SCI.
     """
-    if amostras_por_ciclo <= 0:
-        raise ValueError("O número de amostras por ciclo deve ser maior que zero.")
-    if dac_bits <= 0:
-        raise ValueError("A resolução do DAC em bits deve ser maior que zero.")
-    if frequencia_onda <= 0:
-        raise ValueError("A frequência da onda deve ser maior que zero.")
-    if not (0 <= amplitude_normalizada <= 1):
-        raise ValueError("A amplitude normalizada deve estar entre 0 e 1.")
+    try:
+        # Geração do eixo do tempo
+        # O tempo total de um ciclo de buffer depende do número de pontos e da taxa do DAC
+        tempo_total = NUM_PONTOS_DAC / FREQ_ATUALIZACAO_DAC
+        tempo = np.linspace(0, tempo_total, NUM_PONTOS_DAC, endpoint=False)
+        
+        # Geração da Onda 
+        onda_fund = AMP_FUNDAMENTAL * np.sin(2 * np.pi * FREQ_FUNDAMENTAL * tempo)
+        onda_harm = 0
+        if PRESENCA_HARMONICA:
+            onda_harm = AMP_HARMONICA * np.sin(2 * np.pi * FREQ_HARMONICA * tempo)
+            
+        onda_composta = onda_fund + onda_harm
+        
+        # Normalização para o DAC (12 bits: 0 a 4095)
+        # Limita a amplitude para não exceder 1.0 ou -1.0
+        onda_composta = np.clip(onda_composta, -1.0, 1.0)
+        onda_discreta = 2047 * onda_composta + 2048
+        forma_onda_int = onda_discreta.astype(int).tolist()
 
-    max_dac_val = (2**dac_bits) - 1
-    offset = max_dac_val / 2.0
-    amplitude_dac = amplitude_normalizada * (max_dac_val / 2.0)
+        # Empacotamento
+        tamanho_payload_bytes = len(forma_onda_int) * 2 
+        formato = f'<Bh{len(forma_onda_int)}h'
+        packet_to_send = struct.pack(formato, CMD_RECEIVE_VECTOR, tamanho_payload_bytes, *forma_onda_int)
+        
+        # Envio
+        ser_connection.write(packet_to_send)
+        print(f"\nVetor de {NUM_PONTOS_DAC} pontos enviado com sucesso ({len(packet_to_send)} bytes).")
 
-    dac_valores = []
-    for i in range(amostras_por_ciclo):
-        valor = offset + amplitude_dac * math.sin(2 * math.pi * i / amostras_por_ciclo)
-        dac_valores.append(int(round(max(0, min(valor, max_dac_val)))))
+        # Plot
+        plt.figure("Sinal Enviado (Python)", figsize=(8, 3))
+        plt.plot(tempo, forma_onda_int, marker='.', linestyle='-', color='b')
+        plt.title("Sinal Gerado para o DAC")
+        plt.xlabel("Tempo (s)")
+        plt.ylabel("Amplitude (ADC Cts)")
+        plt.grid(True)
+        plt.show()
 
-    frequencia_amostragem = frequencia_onda * amostras_por_ciclo
+    except Exception as e:
+        print(f"Erro no envio: {e}")
 
-    return dac_valores, frequencia_amostragem
-
-def salvar_vetor_em_arquivo_c(filename, vetor_dac, freq_onda, num_amostras, res_dac, amp_norm, freq_amostragem, prd_timer_val):
+def receive_vector(ser_connection):
     """
-    Salva o vetor DAC em um arquivo .c.
+    Solicita o vetor de amostras ao microcontrolador, recebe e plota no tempo e frequência (FFT).
     """
-    current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        ser_connection.flushInput()
+        
+        # Solicita o envio do vetor
+        request_packet = struct.pack('<Bh', CMD_SEND_VECTOR, 0)
+        ser_connection.write(request_packet)
+        print(f"\nSolicitando vetor de {NUM_PONTOS_ADC} amostras do ADC...")
 
-    with open(filename, "w") as f_c:
-        f_c.write(f"/*\n")
-        f_c.write(f" * Arquivo gerado por script Python em {current_time}\n")
-        f_c.write(f" * Frequência da Onda: {freq_onda} Hz\n")
-        f_c.write(f" * Amostras por Ciclo: {num_amostras}\n")
-        f_c.write(f" * Resolução do DAC: {res_dac} bits (Valores de 0 a {(2**res_dac)-1})\n")
-        f_c.write(f" * Amplitude da Onda (Normalizada 0-1): {amp_norm}\n")
-        f_c.write(f" * Frequência de Amostragem Necessária (para Timer): {freq_amostragem:.2f} Hz\n")
-        f_c.write(f" * Valor PRD Recomendado para o Timer: {int(round(prd_timer_val))}\n")
-        f_c.write(f" */\n\n")
-        f_c.write(f"#include <stdint.h>\n\n") # Inclui stdint.h para uint16_t
-        f_c.write(f"// Vetor contendo os valores para o DAC\n")
-        f_c.write(f"const uint16_t dac_buffer[{len(vetor_dac)}] = {{\n")
-        for i, val in enumerate(vetor_dac):
-            f_c.write(f"    {val},")
-            if (i + 1) % 10 == 0:
-                f_c.write("\n")
-            else:
-                f_c.write(" ")
-        f_c.write(f"\n}};\n")
+        # Aguarda a resposta (NUM_PONTOS_ADC * 2 bytes)
+        bytes_esperados = NUM_PONTOS_ADC * 2
+        response_data = ser_connection.read(bytes_esperados)
 
-    print(f"\nResultados salvos em '{filename}'")
+        if not response_data or len(response_data) < bytes_esperados:
+            print(f"ERRO: Timeout. Recebeu {len(response_data)} de {bytes_esperados} bytes.")
+            return
 
+        # Desempacotamento dinâmico
+        formato_recepcao = f'<{NUM_PONTOS_ADC}h'
+        vetor_adc = struct.unpack(formato_recepcao, response_data)
+        vetor_adc = np.array(vetor_adc)
+        
+        print("Vetor recebido com sucesso. Processando gráficos...")
+
+        # Processamento: Eixo do tempo
+        tempo_total = NUM_PONTOS_ADC / TAXA_AMOSTRAGEM_ADC
+        tempo = np.linspace(0, tempo_total, NUM_PONTOS_ADC, endpoint=False)
+
+        # Processamento: FFT (Domínio da Frequência)
+        # Remove a componente DC (média) para a FFT não ser dominada pelo offset do ADC
+        vetor_sem_dc = vetor_adc - np.mean(vetor_adc)
+        
+        fft_valores = np.fft.fft(vetor_sem_dc)
+        fft_amplitudes = 2.0 / NUM_PONTOS_ADC * np.abs(fft_valores[0:NUM_PONTOS_ADC//2])
+        frequencias_eixo = np.fft.fftfreq(NUM_PONTOS_ADC, 1.0/TAXA_AMOSTRAGEM_ADC)[0:NUM_PONTOS_ADC//2]
+
+        # 6. Plotagem Subplots (Tempo e Frequência)
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
+        fig.suptitle("Análise do Sinal Adquirido do ADC")
+
+        # Gráfico no Tempo
+        ax1.plot(tempo, vetor_adc, color='g', marker='.')
+        ax1.set_title("Domínio do Tempo")
+        ax1.set_xlabel("Tempo (s)")
+        ax1.set_ylabel("Amplitude (ADC Cts)")
+        ax1.grid(True)
+
+        # Gráfico na Frequência (FFT)
+        ax2.plot(frequencias_eixo, fft_amplitudes, color='r')
+        ax2.set_title("Domínio da Frequência (FFT)")
+        ax2.set_xlabel("Frequência (Hz)")
+        ax2.set_ylabel("Magnitude")
+        ax2.grid(True)
+        # Limita o eixo X para facilitar a visualização das harmônicas principais
+        ax2.set_xlim(0, max(FREQ_FUNDAMENTAL, FREQ_HARMONICA) * 4) 
+
+        plt.tight_layout()
+        plt.show()
+
+    except Exception as e:
+        print(f"Erro na recepção: {e}")
 
 if __name__ == "__main__":
-    print("--- Gerador de Vetor DAC para Senoide ---")
-
-    try:
-        # Pede os parâmetros ao usuário
-        freq_onda = float(input("Digite a frequência da onda em Hz (ex: 50): "))
-        num_amostras = int(input("Digite o número de amostras por ciclo (ex: 200): "))
-        res_dac = int(input("Digite a resolução do DAC em bits (ex: 12): "))
-        amplitude_norm = float(input("Digite a amplitude da onda (de 0.0 a 1.0, onde 1.0 é máxima): "))
-
-        # Gera o vetor e a frequência de amostragem
-        vetor_dac, freq_amostragem = gerar_vetor_dac_parametrizado(freq_onda, num_amostras, res_dac, amplitude_norm)
-
-        # Assume um clock de timer padrão de 200 MHz para o TMS320F28379D
-        # Adapte este valor se seu clock for diferente!
-        clock_timer = 200_000_000 # 200 MHz
-        prd_timer = (clock_timer / freq_amostragem) - 1
-
-        print(f"\n--- Resultados Calculados (para sua referencia) ---")
-        print(f"Frequencia da Onda Desejada: {freq_onda} Hz")
-        print(f"Número de Amostras por Ciclo: {num_amostras}")
-        print(f"Resolucao do DAC: {res_dac} bits (Valores de 0 a {(2**res_dac)-1})")
-        print(f"Amplitude da Onda (Normalizada 0-1): {amplitude_norm}")
-        print(f"Frequencia de Amostragem Necessaria (para Timer): {freq_amostragem:.2f} Hz")
-        print(f"Valor PRD Recomendado para o Timer (com clock de {clock_timer/1e6:.0f} MHz): {int(round(prd_timer))}")
-        print(f"Valor Minimo Gerado: {min(vetor_dac)}")
-        print(f"Valor Maximo Gerado: {max(vetor_dac)}")
-
-        # Salvar o vetor em arquivo .c
-        salvar_vetor_em_arquivo_c("dac_buffer_values.c", vetor_dac, freq_onda, num_amostras, res_dac, amplitude_norm, freq_amostragem, prd_timer)
-
-    except ValueError as e:
-        print(f"\nErro de entrada: {e}. Por favor, digite valores numéricos válidos e verifique o range da amplitude.")
-    except Exception as e:
-        print(f"\nOcorreu um erro inesperado: {e}")
+    main()
