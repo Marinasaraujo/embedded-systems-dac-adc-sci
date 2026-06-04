@@ -12,16 +12,18 @@ CMD_SEND_VECTOR    = 2 # PC pede o vetor do ADC para o 28379D
 
 # Parâmetros alteraveis do sistema 
 NUM_PONTOS_DAC = 200        # Numero de amostras enviadas ao DAC
-FREQ_ATUALIZACAO_DAC = 12000 # Taxa de atualizacao do DAC em Hz (Timer 1)
+FREQ_ATUALIZACAO_DAC = 5000 # Taxa de atualizacao do DAC em Hz (Timer 1)
 FREQ_FUNDAMENTAL = 60       # Frequencia fundamental em Hz
 AMP_FUNDAMENTAL = 0.8       # Amplitude da fundamental (0.0 a 1.0)
 
-PRESENCA_HARMONICA = True
-FREQ_HARMONICA = 180        # 3a Harmonica (180 Hz)
-AMP_HARMONICA = 0.2         # Amplitude da harmonica (0.0 a 1.0)
+PRESENCA_HARMONICA = False
+FREQ1_HARMONICA = 600        
+AMP1_HARMONICA = 0.1         # Amplitude da harmonica (0.0 a 1.0)
+FREQ2_HARMONICA = 6000       
+AMP2_HARMONICA = 0.01         
 
-NUM_PONTOS_ADC = 100        # Tamanho do buffer configurado no C (TAM_BUFFER_ADC)
-TAXA_AMOSTRAGEM_ADC = 12000 # Taxa de amostragem do ADC em Hz (Timer 0)
+NUM_PONTOS_ADC = 200        # Tamanho do buffer configurado no C (TAM_BUFFER_ADC)
+TAXA_AMOSTRAGEM_ADC = 5000 # Taxa de amostragem do ADC em Hz (Timer 0)
 
 
 def main():
@@ -66,11 +68,13 @@ def send_vector(ser_connection):
         
         # Geração da Onda 
         onda_fund = AMP_FUNDAMENTAL * np.sin(2 * np.pi * FREQ_FUNDAMENTAL * tempo)
-        onda_harm = 0
+        onda1_harm = 0
+        onda2_harm = 0
         if PRESENCA_HARMONICA:
-            onda_harm = AMP_HARMONICA * np.sin(2 * np.pi * FREQ_HARMONICA * tempo)
+            onda1_harm = AMP1_HARMONICA * np.sin(2 * np.pi * FREQ1_HARMONICA * tempo)
+            onda2_harm = AMP2_HARMONICA * np.sin(2 * np.pi * FREQ2_HARMONICA * tempo)
             
-        onda_composta = onda_fund + onda_harm
+        onda_composta = onda_fund + onda1_harm + onda2_harm
         
         # Normalização para o DAC (12 bits: 0 a 4095)
         # Limita a amplitude para não exceder 1.0 ou -1.0
@@ -138,7 +142,7 @@ def receive_vector(ser_connection):
         fft_amplitudes = 2.0 / NUM_PONTOS_ADC * np.abs(fft_valores[0:NUM_PONTOS_ADC//2])
         frequencias_eixo = np.fft.fftfreq(NUM_PONTOS_ADC, 1.0/TAXA_AMOSTRAGEM_ADC)[0:NUM_PONTOS_ADC//2]
 
-        # 6. Plotagem Subplots (Tempo e Frequência)
+        # Plotagem Subplots (Tempo e Frequência)
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
         fig.suptitle("Análise do Sinal Adquirido do ADC")
 
@@ -155,8 +159,8 @@ def receive_vector(ser_connection):
         ax2.set_xlabel("Frequência (Hz)")
         ax2.set_ylabel("Magnitude")
         ax2.grid(True)
-        # Limita o eixo X para facilitar a visualização das harmônicas principais
-        ax2.set_xlim(0, max(FREQ_FUNDAMENTAL, FREQ_HARMONICA) * 4) 
+
+        ax2.set_xlim(0, TAXA_AMOSTRAGEM_ADC / 2) 
 
         plt.tight_layout()
         plt.show()
